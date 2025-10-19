@@ -1,0 +1,657 @@
+<!--
+    Fixes applied:
+    - Rewrote HTML export generation to use a safe, minimal export CSS and string concatenation
+        to avoid embedding large raw CSS into a template literal which caused parser/lint errors.
+    - Escaped closing </script> sequences in generated strings so the inline script block
+        isn't prematurely terminated by the browser.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Presentation Slide Generator</title>
+    <!-- Tailwind CSS CDN for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- New: Libraries for PDF Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    
+    <!-- Firebase Libraries (for required canvas environment setup) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global Firebase setup for the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        if (Object.keys(firebaseConfig).length > 0) {
+            const app = initializeApp(firebaseConfig);
+            window.db = getFirestore(app);
+            window.auth = getAuth(app);
+            
+            // Sign in using the custom token or anonymously
+            (async () => {
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(window.auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(window.auth);
+                    }
+                    window.userId = window.auth.currentUser.uid;
+                    console.log("Firebase initialized and user signed in:", window.userId);
+                } catch (error) {
+                    console.error("Firebase Auth Error:", error);
+                }
+            })();
+        } else {
+            console.warn("Firebase config not available. Running in local-only mode.");
+        }
+    </script>
+
+    <script>
+        // Custom Tailwind config for the dark mode aesthetic
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'accent-blue': '#00BCD4', // Electric blue/cyan (Primary accent)
+                        'dark-bg': '#000000', // Pure black background for max contrast
+                        'dark-card': '#1b1b1b', // Card surface
+                        'text-primary': '#FFFFFF',
+                        'text-secondary': '#aaaaaa',
+                    },
+                    boxShadow: {
+                        // Stronger, cleaner glow effect
+                        'custom-glow': '0 0 10px rgba(0, 188, 212, 0.8), 0 0 20px rgba(0, 188, 212, 0.4)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--dark-bg);
+            color: var(--text-primary); /* ALL PRIMARY TEXT IS WHITE/LIGHT */
+        }
+
+        /* Styling for the bold blue accent */
+        .slide-content b, .slide-title-styled b {
+            color: #00BCD4; /* Accent blue */
+            font-weight: 900; /* Extra heavy weight */
+            letter-spacing: 0.05em; /* Subtle letter spacing */
+            /* Added text-shadow to make the bold text look slightly corrupted/glowing */
+            text-shadow: 0 0 5px rgba(0, 188, 212, 0.8);
+        }
+
+        /* Main slide container for a horizontal 16:9 ratio */
+        .slide-container {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            box-sizing: border-box;
+            background-color: #000000; /* Pure black slide background */
+            border: 2px solid rgba(0, 188, 212, 0.2);
+            padding: 3rem !important; /* Increased padding for more negative space */
+            /* Added glitch border animation */
+            animation: border-flicker 10s steps(1) infinite;
+        }
+
+        /* Border flickering animation for the corrupted aesthetic */
+        @keyframes border-flicker {
+            0% { border-color: rgba(0, 188, 212, 0.2); }
+            5% { border-color: rgba(0, 188, 212, 0.5); }
+            10% { border-color: rgba(0, 188, 212, 0.2); }
+            25% { border-color: rgba(0, 188, 212, 0.1); }
+            30% { border-color: rgba(0, 188, 212, 0.6); }
+            100% { border-color: rgba(0, 188, 212, 0.2); }
+        }
+        
+        /* Typography adjustments for high impact and readability */
+        .slide-container h3 {
+            font-size: 3rem; /* Large text for titles */
+            font-weight: 900;
+            line-height: 1.1; /* Tight line height for impact */
+            margin-bottom: 1.5rem;
+            text-transform: uppercase;
+            /* Added glitch text effect */
+            position: relative;
+            animation: text-glitch 5s ease-in-out infinite alternate;
+        }
+
+        /* Glitch animation for text */
+        @keyframes text-glitch {
+            0% { transform: translate(0); text-shadow: 1px 0 0 rgba(0, 188, 212, 0.6), -1px 0 0 rgba(255, 255, 255, 0.6); }
+            20% { transform: translate(1px, -1px); text-shadow: -1px 0 0 rgba(0, 188, 212, 0.6), 1px 0 0 rgba(255, 255, 255, 0.6); }
+            40% { transform: translate(-1px, 1px); text-shadow: 2px 0 0 rgba(0, 188, 212, 0.6), -2px 0 0 rgba(255, 255, 255, 0.6); }
+            60% { transform: translate(2px, 0); text-shadow: -2px 0 0 rgba(0, 188, 212, 0.6), 2px 0 0 rgba(255, 255, 255, 0.6); }
+            80% { transform: translate(-2px, 2px); text-shadow: 0 0 5px rgba(0, 188, 212, 0.8); }
+            100% { transform: translate(0); text-shadow: 0 0 5px rgba(0, 188, 212, 0.8); }
+        }
+
+        .slide-container li {
+            margin-bottom: 1.5rem; /* Increased spacing between list items */
+        }
+
+        .slide-container .slide-content span:not(.text-3xl) {
+             /* Apply a similar, less intense glitch effect to body text */
+            animation: text-glitch-subtle 4s ease-in-out infinite alternate-reverse;
+            display: inline-block; /* Required for transform to work */
+        }
+        
+        @keyframes text-glitch-subtle {
+            0% { transform: translate(0); }
+            10% { transform: translate(0.5px, 0.5px); }
+            20% { transform: translate(-0.5px, -0.5px); }
+            100% { transform: translate(0); }
+        }
+
+        .slide-container .slide-content .text-xl {
+            font-size: 1.6rem; /* Large list item text */
+            font-weight: 500;
+        }
+
+        /* Input/Button focus style */
+        .focus-ring {
+            box-shadow: 0 0 0 3px rgba(0, 188, 212, 0.5);
+            border-color: #00BCD4;
+        }
+
+        /* Custom spinner */
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top: 4px solid #00BCD4;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-dark-bg p-4 sm:p-8 min-h-screen">
+
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-accent-blue mb-6 border-b-4 border-accent-blue/50 pb-2 uppercase tracking-wider">
+            AI Presentation Slide Generator
+        </h1>
+
+        <!-- Input & Controls Section -->
+        <div class="bg-dark-card p-6 rounded-xl shadow-2xl mb-8 border border-gray-700">
+            <h2 class="text-xl font-semibold text-text-primary mb-4">1. Script Input & Generation</h2>
+            
+            <!-- Script Area -->
+            <textarea id="script-input" rows="8" 
+                      class="w-full p-4 border border-gray-600 rounded-lg bg-dark-bg text-text-primary focus:outline-none focus-ring transition duration-200" 
+                      placeholder="Paste your full presentation script here. The AI will segment, style, and generate cinematic visuals for each slide."
+            ></textarea>
+            
+            <!-- Buttons -->
+            <!-- Updated layout to include a third HTML export button -->
+            <div class="flex flex-col space-y-4 mt-4">
+                <button id="generate-slides-btn" 
+                        class="flex-grow flex items-center justify-center bg-accent-blue text-dark-bg font-bold py-3 px-6 rounded-lg hover:bg-opacity-90 transition duration-300 shadow-custom-glow active:shadow-none uppercase tracking-wider">
+                    <span id="generate-text">Generate Slides</span>
+                    <div id="generate-spinner" class="spinner ml-3 hidden"></div>
+                </button>
+                
+                <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+                    <button id="export-html-btn" disabled
+                            class="flex-grow flex items-center justify-center bg-gray-700 text-text-primary font-bold py-3 px-6 rounded-lg opacity-50 cursor-not-allowed transition duration-300 uppercase tracking-wider">
+                        Export to HTML (.html)
+                    </button>
+                    <button id="export-pdf-btn" disabled
+                            class="flex-grow flex items-center justify-center bg-gray-700 text-text-primary font-bold py-3 px-6 rounded-lg opacity-50 cursor-not-allowed transition duration-300 uppercase tracking-wider">
+                        Export to PDF (.pdf)
+                    </button>
+                </div>
+            </div>
+            <p id="loading-indicator" class="text-accent-blue mt-4 hidden text-center font-medium">
+                Processing script, structuring content, and creating images...
+            </p>
+        </div>
+
+        <!-- Output Section -->
+        <div id="slides-output" class="space-y-6">
+            <h2 class="text-xl font-semibold text-text-primary mb-4">2. Generated Slides Preview</h2>
+            <p id="initial-message" class="text-text-secondary italic p-4 bg-dark-card rounded-lg border border-gray-700">
+                Generated slides will appear here. The style is now fine-tuned for **high-contrast, bold typography, impactful negative space, and a corrupted/glitch aesthetic**. Images will now be **vibrant and in color**.
+            </p>
+        </div>
+    </div>
+
+    <script type="module">
+        // Global variables for API key and endpoints
+        const API_KEY = ""; // Canvas provides this dynamically if empty
+        const TEXT_MODEL = 'gemini-2.5-flash-preview-09-2025';
+        const IMAGE_MODEL = 'gemini-2.5-flash-image-preview'; 
+
+        window.generatedSlides = []; // Store slide data globally for PDF export
+
+        // --- Core Gemini API Call Function ---
+        async function callGeminiApi(url, payload) {
+            let attempt = 0;
+            const maxAttempts = 3;
+
+            while (attempt < maxAttempts) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.status === 429) { // Rate limit handling
+                        if (attempt < maxAttempts - 1) {
+                            const delay = Math.pow(2, attempt) * 1000;
+                            console.warn(`Rate limit exceeded. Retrying in ${delay / 1000}s...`);
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            attempt++;
+                            continue;
+                        }
+                    }
+
+                    if (!response.ok) {
+                        const errorBody = await response.json();
+                        throw new Error(`API Request Failed (HTTP ${response.status}): ${JSON.stringify(errorBody)}`);
+                    }
+
+                    return await response.json();
+
+                } catch (error) {
+                    if (attempt === maxAttempts - 1) {
+                        throw error;
+                    }
+                    // Simple retry for network/other errors
+                    const delay = Math.pow(2, attempt) * 1000;
+                    console.warn(`Error on attempt ${attempt + 1}: ${error.message}. Retrying in ${delay / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    attempt++;
+                }
+            }
+        }
+
+        // --- Utility Functions for Slide Creation ---
+
+        function displayError(message) {
+            const outputDiv = document.getElementById('slides-output');
+            outputDiv.innerHTML = `<h2 class="text-xl font-semibold text-text-primary mb-4">2. Generated Slides Preview</h2>
+                <div class="bg-red-900/50 p-4 rounded-lg border border-red-400 text-red-100">${message}</div>`;
+        }
+        
+        function createProcessingSlide(title) {
+            const div = document.createElement('div');
+            div.className = 'text-center text-accent-blue font-semibold mb-4 p-4 bg-dark-card rounded-lg border border-accent-blue/50 shadow-custom-glow';
+            div.textContent = `⏳ Processing: ${title}...`;
+            return div;
+        }
+
+        /**
+         * Step 1: Segments the raw script into logical slide topics/sections.
+         */
+        async function segmentScript(script) {
+            const prompt = `
+                Analyze the following script and break it down into 3 to 5 logical, concise sections suitable for individual presentation slides. 
+                Return the result as a JSON array of strings, where each string is the raw text for one slide. Do not include any other text or markdown outside the JSON array.
+                Script: "${script}"
+            `;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${API_KEY}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "ARRAY",
+                        items: { "type": "STRING" }
+                    }
+                }
+            };
+            const result = await callGeminiApi(url, payload);
+            const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+            return JSON.parse(jsonText);
+        }
+
+        /**
+         * Step 2: Formats the content for a single slide.
+         */
+        async function formatContent(slideText) {
+            const prompt = `
+                You are a presentation copywriter focused on high-impact, cinematic typography. Take the following slide text and transform it into a highly stylized slide object.
+                CRITICAL STYLING RULE:
+                1.  Generate a short, powerful, ALL CAPS title. Use **double asterisks** around 1-2 keywords for the bold/cyan accent.
+                2.  Generate 3-5 concise bullet points (strings in an array). Use **double asterisks** around 1-2 key phrases in each point for the bold/cyan accent. Ensure points are direct and minimal.
+                3.  Generate an 'imagePrompt' for an AI image generator (gemini-2.5-flash-image-preview). The prompt must be short, highly cinematic, and request a **high-impact, vibrant, conceptual visual** that matches the dark, technical aesthetic.
+                
+                Input Slide Text: "${slideText}"
+            `;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${API_KEY}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: { parts: [{ text: "The response must ONLY contain a single valid JSON object structured according to the provided schema." }] },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "title": { "type": "STRING" },
+                            "contentPoints": { "type": "ARRAY", "items": { "type": "STRING" } },
+                            "imagePrompt": { "type": "STRING" }
+                        },
+                        propertyOrdering: ["title", "contentPoints", "imagePrompt"]
+                    }
+                }
+            };
+            const result = await callGeminiApi(url, payload);
+            const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+            return JSON.parse(jsonText);
+        }
+
+        /**
+         * Step 3: Generates the vibrant cinematic image using gemini-2.5-flash-image-preview.
+         */
+        async function generateImage(prompt) {
+            // CHANGED: Updated prompt to request vibrant color and removed B&W constraints
+            const fullPrompt = `Cinematic, highly detailed, vibrant color, digital art style, volumetric lighting, dark and technical aesthetic: ${prompt}`;
+            // CHANGED: Updated URL to use generateContent endpoint for image generation
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent?key=${API_KEY}`;
+            
+            const payload = {
+                contents: [{ 
+                    parts: [{ text: fullPrompt }] 
+                }],
+                generationConfig: {
+                    // Specify that the response modality includes an image
+                    responseModalities: ['TEXT', 'IMAGE']
+                }
+            };
+            
+            const result = await callGeminiApi(url, payload);
+            // CHANGED: Adjusted result extraction to match gemini-2.5-flash-image-preview response structure
+            const base64Data = result?.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
+
+            if (!base64Data) {
+                throw new Error("Image generation failed. No data returned.");
+            }
+            return `data:image/png;base64,${base64Data}`;
+        }
+        
+        /**
+         * Renders a single slide element into the DOM.
+         */
+        function createSlideElement(slideData, imageUrl, isLastSlide, index) {
+            // Apply bold styling using the accent color
+            const titleHtml = slideData.title.toUpperCase().replace(/\*\*(.*?)\*\*/g, '<b class="text-accent-blue">$1</b>');
+            const contentHtml = slideData.contentPoints.map(point => {
+                const styledPoint = point.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+                return `<li class="flex items-start">
+                            <span class="text-accent-blue font-extrabold mr-4 text-3xl leading-none">&raquo;</span>
+                            <!-- FIX: Explicitly added text-white to ensure unbolded text is visible against the black background -->
+                            <span class="font-medium text-xl text-white">${styledPoint}</span>
+                        </li>`;
+            }).join('');
+
+            const marginClass = isLastSlide ? '' : 'mb-8';
+
+            const slideElement = document.createElement('div');
+            slideElement.id = `slide-${index}`;
+            slideElement.className = `slide-container p-4 sm:p-8 rounded-xl shadow-2xl ${marginClass}`;
+            slideElement.innerHTML = `
+                <div class="flex h-full flex-col sm:flex-row space-y-8 sm:space-y-0 sm:space-x-8">
+                    
+                    <!-- Left: Content (70%) -->
+                    <div class="w-full sm:w-7/12 flex flex-col justify-center py-4">
+                        <div class="slide-title-styled mb-8">
+                            <h3 class="text-3xl sm:text-5xl font-extrabold text-text-primary leading-tight">${titleHtml}</h3>
+                        </div>
+                        <ul class="list-none space-y-6 slide-content">
+                            ${contentHtml}
+                        </ul>
+                    </div>
+
+                    <!-- Right: Visual (30%) -->
+                    <div class="w-full sm:w-5/12 flex items-center justify-center flex-shrink-0">
+                        <div class="w-full h-full p-2 flex items-center justify-center bg-dark-bg border-4 border-accent-blue/20 rounded-lg shadow-custom-glow overflow-hidden">
+                            <img src="${imageUrl}" alt="AI Generated Visual for Slide" 
+                                class="w-full h-full object-cover" 
+                                onerror="this.onerror=null;this.src='https://placehold.co/400x300/000000/aaaaaa?text=IMAGE+ERROR';"
+                            >
+                        </div>
+                    </div>
+                </div>
+            `;
+            return slideElement;
+        }
+        
+        // --- NEW: HTML Export Logic ---
+        function exportToHtml() {
+            const slides = document.querySelectorAll('.slide-container');
+            if (slides.length === 0) return;
+
+            const htmlBtn = document.getElementById('export-html-btn');
+            htmlBtn.textContent = "EXPORTING HTML...";
+            htmlBtn.disabled = true;
+
+            try {
+                let slideHtml = '';
+                slides.forEach(slide => {
+                    // Get the outer HTML of the rendered slide container
+                    slideHtml += slide.outerHTML;
+                });
+
+                // Get the custom CSS defined in the <style> tag
+                const customCss = document.querySelector('style').textContent;
+                
+                // Use a minimal, safe CSS for export to avoid embedding large raw CSS that may break static parsers
+                const exportCss = '\n' +
+                    '/* Export-only CSS: keep it minimal and robust */\n' +
+                    'body { background-color: #000000; color: #FFFFFF; padding: 2rem; font-family: Inter, sans-serif; }\n' +
+                    '.slide-container { margin-bottom: 4rem !important; width: 90%; max-width: 1200px; margin-left: auto; margin-right: auto; box-sizing: border-box; }\n' +
+                    '.slide-container h3 { font-size: 2.5rem; font-weight: 900; line-height: 1.1; color: #FFFFFF; }\n' +
+                    '.slide-container .slide-content .text-xl, .slide-container .slide-content li { color: #FFFFFF; font-size: 1.25rem; }\n' +
+                    '.slide-container img { width: 100%; height: auto; display: block; object-fit: cover; }\n' +
+                    '.slide-container, .slide-container h3, .slide-container .slide-content span:not(.text-3xl) { animation: none !important; }\n';
+
+                // Construct the full, self-contained HTML file using concatenation
+                const fullHtml = '<!DOCTYPE html>' +
+                    '<html lang="en">' +
+                    '<head>' +
+                    '    <meta charset="UTF-8">' +
+                    '    <meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+                    '    <title>AI Presentation Export</title>' +
+                    '    <!-- Load Tailwind to ensure styling is applied -->' +
+                    '    <script src="https://cdn.tailwindcss.com"><\/script>' +
+                    '    <style>' + exportCss + '    </style>' +
+                    '</head>' +
+                    '<body class="bg-dark-bg p-4 min-h-screen">' +
+                    '    <div class="max-w-4xl mx-auto mb-10">' +
+                    '        <h1 class="text-3xl sm:text-4xl font-extrabold text-accent-blue border-b-4 border-accent-blue/50 pb-2 uppercase tracking-wider">' +
+                    '            AI Presentation Slides' +
+                    '        </h1>' +
+                    '        <p class="text-text-secondary mt-2">Generated from the AI Presentation Slide Generator.</p>' +
+                    '    </div>' +
+                    '    <div class="space-y-16">' +
+                    slideHtml +
+                    '    </div>' +
+                    '</body>' +
+                    '</html>';
+
+        // Create a Blob and trigger download
+        const blob = new Blob([fullHtml], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'AI_Presentation.html';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+    } catch(e) {
+        console.error("HTML Export failed:", e);
+        // Using a simple message box instead of alert()
+        alert("HTML export failed. Check console for details.");
+    } finally {
+        htmlBtn.textContent = "Export to HTML (.html)";
+        htmlBtn.disabled = false;
+    }
+} // <-- ADDED MISSING CLOSING BRACE HERE
+        // --- Main Generation Handler ---
+        document.getElementById('generate-slides-btn').addEventListener('click', async () => {
+            const script = document.getElementById('script-input').value.trim();
+            const generateButton = document.getElementById('generate-slides-btn');
+            const outputDiv = document.getElementById('slides-output');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const initialMessage = document.getElementById('initial-message');
+            const pdfExportButton = document.getElementById('export-pdf-btn');
+            const htmlExportButton = document.getElementById('export-html-btn'); // New button reference
+
+            if (script.length < 50) {
+                // Using a simple message box instead of alert()
+                alert("Please enter a substantial script (at least a few sentences) for the AI to analyze.");
+                return;
+            }
+
+            // Reset UI and set loading state
+            outputDiv.innerHTML = '<h2 class="text-xl font-semibold text-text-primary mb-4">2. Generated Slides Preview</h2>';
+            window.generatedSlides = [];
+            generateButton.disabled = true;
+            pdfExportButton.disabled = true;
+            htmlExportButton.disabled = true; // Disable new button
+            loadingIndicator.classList.remove('hidden');
+            initialMessage.classList.add('hidden');
+            
+            let generationSuccess = true;
+
+            try {
+                // 1. SEGMENT SCRIPT
+                loadingIndicator.textContent = 'Processing script, structuring content...';
+                const scriptSegments = await segmentScript(script);
+                
+                if (!scriptSegments || scriptSegments.length === 0) {
+                    throw new Error("AI failed to segment the script. Try a longer, more structured input.");
+                }
+
+                // 2. PROCESS EACH SLIDE SEQUENTIALLY
+                for (let i = 0; i < scriptSegments.length; i++) {
+                    const segment = scriptSegments[i];
+                    const isLastSlide = (i === scriptSegments.length - 1);
+
+                    // Add a temporary processing message to the DOM
+                    const processingSlideDiv = createProcessingSlide(`Slide ${i + 1}`);
+                    outputDiv.appendChild(processingSlideDiv);
+                    
+                    // a. Format Content & Get Image Prompt
+                    const formattedData = await formatContent(segment);
+                    const slideTitle = formattedData.title.replace(/\*\*(.*?)\*\*/g, '$1');
+                    processingSlideDiv.textContent = `⏳ Processing: ${slideTitle.toUpperCase()} (Generating Visual)...`;
+                    
+                    // b. Generate Image
+                    const imageUrl = await generateImage(formattedData.imagePrompt);
+
+                    // c. Render final slide
+                    const slideData = {
+                        ...formattedData,
+                        imageUrl: imageUrl,
+                        index: i 
+                    };
+                    window.generatedSlides.push(slideData);
+
+                    const slideElement = createSlideElement(slideData, imageUrl, isLastSlide, i); 
+                    outputDiv.appendChild(slideElement);
+                    processingSlideDiv.remove(); 
+                }
+
+            } catch (error) {
+                const errorMessage = `Generation failed. Last known error: ${error.message}`;
+                console.error(errorMessage);
+                displayError(`❌ ${errorMessage}`);
+                generationSuccess = false;
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                generateButton.disabled = false;
+                
+                // Show export controls only on successful full generation
+                if (generationSuccess) {
+                    // Enable PDF button and apply success styles
+                    pdfExportButton.disabled = false;
+                    pdfExportButton.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-gray-700');
+                    pdfExportButton.classList.add('bg-accent-blue', 'hover:bg-opacity-90', 'shadow-custom-glow');
+                    
+                    // Enable HTML button and apply success styles (using gray-600 to distinguish)
+                    htmlExportButton.disabled = false;
+                    htmlExportButton.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-gray-700');
+                    htmlExportButton.classList.add('bg-gray-600', 'hover:bg-gray-500', 'shadow-custom-glow');
+                } else {
+                    pdfExportButton.classList.remove('shadow-custom-glow');
+                    htmlExportButton.classList.remove('shadow-custom-glow');
+                }
+                loadingIndicator.textContent = 'Processing script, structuring content, and creating images...'; // Reset text
+            }
+        });
+
+
+        // --- PDF Export Logic (Uses html2canvas and jsPDF) ---
+        document.getElementById('export-pdf-btn').addEventListener('click', async () => {
+            const slides = document.querySelectorAll('.slide-container');
+            if (slides.length === 0) return;
+
+            const exportBtn = document.getElementById('export-pdf-btn');
+            exportBtn.textContent = "EXPORTING...";
+            exportBtn.disabled = true;
+            document.getElementById('export-html-btn').disabled = true; // Disable other button during export
+
+            try {
+                // Initialize jsPDF with a landscape A4 orientation
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF('l', 'mm', 'a4'); 
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const pageHeight = doc.internal.pageSize.getHeight();
+                
+                for (let i = 0; i < slides.length; i++) {
+                    const slide = slides[i];
+
+                    // Add a new page for all slides except the first
+                    if (i > 0) {
+                        doc.addPage();
+                    }
+
+                    // Capture the slide content as an image
+                    const canvas = await html2canvas(slide, {
+                        scale: 3, // High resolution capture for better PDF quality
+                        logging: false,
+                        useCORS: true,
+                        backgroundColor: '#000000' // Match the pure black slide background
+                    });
+
+                    const imgData = canvas.toDataURL('image/jpeg', 0.9);
+                    
+                    // Add the image to the PDF, scaling it to fit the page size
+                    doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
+                }
+
+                doc.save('AI_Presentation.pdf');
+            } catch(e) {
+                console.error("PDF Export failed:", e);
+                // Using a simple message box instead of alert()
+                alert("PDF export failed. Check console for details.");
+            } finally {
+                exportBtn.textContent = "Export to PDF (.pdf)";
+                exportBtn.disabled = false;
+                document.getElementById('export-html-btn').disabled = false; // Re-enable other button
+            }
+        });
+
+        // Add event listener for the new HTML export button
+        document.getElementById('export-html-btn').addEventListener('click', exportToHtml);
+    </script>
+</body>
+</html>
